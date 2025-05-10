@@ -19,7 +19,7 @@ export default {
                         type: "system",
                         text: "Загрузка второй арки...",
                         delay: 1000,
-                        nextChapter: "arc2_date_monolog"
+                        nextChapter: "special_start"
                     }
                 ]
             }

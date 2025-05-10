@@ -36,6 +36,15 @@ const gameState = {
 
 let savedState = null; // Переменная для хранения состояния
 
+function getFirstChapterOfCurrentArc() {
+    if (gameState.arc === 1) {
+        return 'chapter1';
+    } else if (gameState.arc === 2) {
+        return 'arc2_date_monolog';
+    }
+    return 'chapter1'; // fallback
+}
+
 function saveStateAtChoice() {
     gameState.lastCheckpoint = {
         chapter: gameState.currentChapter,
@@ -43,6 +52,9 @@ function saveStateAtChoice() {
         arc: gameState.arc
     };
     console.log('Сохранена точка возврата:', gameState.lastCheckpoint);
+    
+    // Сохраняем контрольную точку в localStorage
+    autoSave();
 }
 
 export class LanguageManager {
@@ -152,7 +164,12 @@ export class LanguageManager {
             if (newGameBtn) newGameBtn.title = this.translations[this.currentLang]['new-game'];
             
             const restartChapterBtn = document.querySelector('.start-chapter-over');
-            if (restartChapterBtn) restartChapterBtn.title = this.translations[this.currentLang]['restart-chapter'];
+            if (restartChapterBtn) {
+            restartChapterBtn.addEventListener('click', () => {
+            if (gameState.isBusy) return;
+            restartChapter();
+            });
+            }
             
             const langBtn = document.querySelector('.lang-btn');
             if (langBtn) langBtn.title = this.translations[this.currentLang]['change-lang'];
@@ -288,37 +305,46 @@ function openFullscreenImage(src) {
   });
 }
 
+
 // Загрузка главы
 async function loadChapter(chapterId) {
+    document.body.classList.add('loading-chapter');
+    document.querySelector('.phone').classList.add('no-transition');
     if (!chapterId) {
         console.error('loadChapter: chapterId is undefined');
         return false;
     }
 
     clearImageCarousel();
+    
+    // Объявляем chapterPath в начале функции
+    let chapterPath;
+    
     try {
         console.log(`Loading chapter: ${chapterId}`);
         
-        let chapterPath;
-        // Обработка разных форматов путей
         if (chapterId.startsWith('arc2/')) {
-            // Для вложенных путей второй арки (arc2/way_to_NTR/...)
             chapterPath = `./chapters/${chapterId}.js`;
             gameState.arc = 2;
         } else if (chapterId.startsWith('arc2_after_date')) {
-            // Для глав из папки after_date
             chapterPath = `./chapters/arc2/after_date/${chapterId}.js`;
             gameState.arc = 2;
         } else if (chapterId.startsWith('arc2_')) {
-            // Для остальных глав второй арки
             chapterPath = `./chapters/arc2/${chapterId}.js`;
             gameState.arc = 2;
+        } else if (chapterId.startsWith('special_')) {
+            // Для специальных глав
+            chapterPath = `./chapters/special/${chapterId}.js`;
         } else {
-            // Для глав первой арки
             chapterPath = `./chapters/arc1/${chapterId}.js`;
         }
         
         console.log('Loading from path:', chapterPath);
+        
+        // Добавляем проверку URL перед загрузкой
+        const fullUrl = new URL(chapterPath, window.location.href).href;
+        console.log('Full URL:', fullUrl);
+        
         const chapterModule = await import(chapterPath);
         
         if (!chapterModule?.default) {
@@ -327,13 +353,20 @@ async function loadChapter(chapterId) {
         }
         
         gameState.currentChapter = chapterId;
+        autoSave();
         renderChapter(chapterModule.default, false);
         
         return true;
     } catch (error) {
         console.error(`Ошибка загрузки главы ${chapterId}:`, error);
+        if (chapterPath) {
+            console.error('Полный путь:', new URL(chapterPath, window.location.href).href);
+        }
         return false;
     }
+    setTimeout(() => {
+        document.body.classList.remove('loading-chapter');
+    }, 300);
 }
 
 // Управление состоянием кнопок
@@ -364,12 +397,16 @@ function displayMessages(messages, container, onComplete, chapter) {
     const messagePromises = messages.map((message, index) => {
         return new Promise(resolve => {
             setTimeout(() => {
-                addMessage(message.type, message.text, container);
+                // Добавляем обработку фото-сообщений
+                if (message.type === 'photo') {
+                    addMessage('received', message.description, container, message.src);
+                } else {
+                    addMessage(message.type, message.text, container);
+                }
                 
                 if (message.nextChoice && chapter) {
                     const nextChoice = chapter.getChoicesByKey(message.nextChoice, gameState);
                     if (nextChoice) {
-                        // Вместо добавления текста в чат, отображаем варианты выбора
                         const choicesContainer = document.getElementById('choices');
                         renderChoices([{
                             text: nextChoice.text,
@@ -393,13 +430,14 @@ function displayMessages(messages, container, onComplete, chapter) {
 
 // Добавление сообщения в чат
 function addMessage(type, text, container, image) {
+    const savedWidth = container.offsetWidth;
+    container.style.width = `${savedWidth}px`;
     const msg = document.createElement('div');
     msg.className = type === 'sent' ? 'message message-sent' : 'message message-received';
     
     const messageId = `msg_${Date.now()}`;
     msg.dataset.messageId = messageId;
     
-    // Если есть текст, обрабатываем его
     if (text) {
         if (window.game.languageManager && window.game.languageManager.chapterTranslations) {
             const currentLang = window.game.languageManager.currentLang;
@@ -411,11 +449,12 @@ function addMessage(type, text, container, image) {
         msg.textContent = text;
     }
     
-    // Если есть изображение, добавляем его
+    // Добавляем обработку изображений
     if (image) {
         const img = document.createElement('img');
         img.src = image;
         img.className = 'chat-image';
+        img.alt = ''; // Добавляем alt для доступности
         img.addEventListener('click', () => {
             openFullscreenImage(img.src);
         });
@@ -431,9 +470,9 @@ function addMessage(type, text, container, image) {
     setTimeout(() => {
         container.scrollTo({
             top: container.scrollHeight,
-            behavior: 'smooth'
+            behavior: 'auto' 
         });
-    }, 50);
+    }, 100);
 }
 
 // Отображение содержимого главы
@@ -517,6 +556,7 @@ function renderChapter(chapter, instant = false) {
 
 // Отображение вариантов выбора
 function renderChoices(choices, container) {
+    console.log("Choices array:", choices);
     if (!container || !choices) return;
     
     container.innerHTML = '';
@@ -532,35 +572,68 @@ function renderChoices(choices, container) {
     saveStateAtChoice();
 
     choices.forEach(choice => {
-        const button = document.createElement('button');
-        button.className = 'choice-button';
-        button.textContent = choice.text;
-        
-        button.addEventListener('click', async () => {
-            if (gameState.isBusy) return;
+        if (choice.type === "photo") {
+            // Создаем кнопку с фото
+            const photoBtn = document.createElement('button');
+            photoBtn.className = 'choice-button photo-choice';
             
-            // Убираем классы при выборе
-            chatContainer.classList.remove('has-choices');
-            container.classList.remove('visible');
+            // Добавляем текст
+            const btnText = document.createElement('span');
+            btnText.textContent = choice.description;
+            photoBtn.appendChild(btnText);
             
-            addMessage('sent', choice.text, chatContainer);
+            // Добавляем превью изображения
+            const imgPreview = document.createElement('img');
+            imgPreview.src = choice.src;
+            imgPreview.className = 'choice-image-preview';
+            photoBtn.appendChild(imgPreview);
             
-            if (choice.result && choice.result.length > 0) {
-                gameState.isBusy = true;
-                await displayMessages(choice.result, chatContainer, () => {
-                    gameState.isBusy = false;
-                    if (choice.result[choice.result.length - 1].nextChapter) {
-                        loadChapter(choice.result[choice.result.length - 1].nextChapter);
-                    }
-                });
-            } else if (choice.nextChapter) {
-                loadChapter(choice.nextChapter);
-            }
+            photoBtn.addEventListener('click', async () => {
+                if (gameState.isBusy) return;
+                
+                // Отправляем фото в чат
+                addMessage('sent', choice.description, chatContainer, choice.src);
+                
+                if (choice.nextChapter) {
+                    loadChapter(choice.nextChapter);
+                }
+                
+                container.innerHTML = '';
+            });
             
-            container.innerHTML = '';
-        });
-        
-        container.appendChild(button);
+            container.appendChild(photoBtn);
+        } else {
+            // Обычная текстовая кнопка
+            const button = document.createElement('button');
+            button.className = 'choice-button';
+            button.textContent = choice.text;
+            
+            button.addEventListener('click', async () => {
+                if (gameState.isBusy) return;
+                
+                // Убираем классы при выборе
+                chatContainer.classList.remove('has-choices');
+                container.classList.remove('visible');
+                
+                addMessage('sent', choice.text, chatContainer);
+                
+                if (choice.result && choice.result.length > 0) {
+                    gameState.isBusy = true;
+                    await displayMessages(choice.result, chatContainer, () => {
+                        gameState.isBusy = false;
+                        if (choice.result[choice.result.length - 1].nextChapter) {
+                            loadChapter(choice.result[choice.result.length - 1].nextChapter);
+                        }
+                    });
+                } else if (choice.nextChapter) {
+                    loadChapter(choice.nextChapter);
+                }
+                
+                container.innerHTML = '';
+            });
+            
+            container.appendChild(button);
+        }
     });
 }
 
@@ -569,6 +642,12 @@ function checkArcCompletion() {
   if (gameState.currentChapter === 'start' || !gameState.currentChapter) {
     return null;
   }
+
+  if (gameState.arc === 1) {
+        if (determineSecondArcStart(gameState)) {
+            return 'special/special_start'; 
+        }
+    }
 
   if (gameState.arc === 1) {
     if (determineSecondArcStart(gameState)) {
@@ -588,6 +667,7 @@ function checkArcCompletion() {
 
 // Отображение экрана окончания главы
 function showEndgameScreen() {
+    saveProgress();
     document.querySelector('[data-screen="endgame"]').classList.add('active');
     document.querySelector('[data-screen="chat"]').classList.remove('active');
     hideNavigation();
@@ -651,6 +731,7 @@ function showScreen(screenId) {
     }
 }
 
+
 // Начало новой игры
 function startNewGame() {
   gameState.choices = {};
@@ -681,124 +762,137 @@ function clearChat() {
 
 // Сохранение прогресса в localStorage
 function saveProgress() {
-  const progress = {
-    chapter: gameState.currentChapter,
-    arc: gameState.arc,
-    language: gameState.language,
-    choices: gameState.choices
-  };
+    const progress = {
+      chapter: gameState.currentChapter,
+      arc: gameState.arc,
+      language: gameState.language,
+      choices: gameState.choices,
+      lastCheckpoint: gameState.lastCheckpoint // Важно: добавляем lastCheckpoint в обычное сохранение
+    };
+    
+    localStorage.setItem('gameProgress', JSON.stringify(progress));
+    console.log('Прогресс сохранен:', progress);
+  }
   
-  localStorage.setItem('gameProgress', JSON.stringify(progress));
-  console.log('Прогресс сохранен:', progress);
-}
+  function clearProgress() {
+      localStorage.removeItem('gameProgress');
+      console.log('Прогресс очищен');
+      
+      // Сбрасываем также контрольную точку
+      gameState.lastCheckpoint = {
+          chapter: 'chapter1',
+          choices: {},
+          arc: 1
+      };
+  }
+  
+  function autoSave() {
+      if (!gameState.currentChapter) return;
+      
+      const progress = {
+          chapter: gameState.currentChapter,
+          arc: gameState.arc,
+          language: gameState.language,
+          choices: gameState.choices,
+          lastCheckpoint: gameState.lastCheckpoint
+      };
+      
+      localStorage.setItem('gameProgress', JSON.stringify(progress));
+      console.log('Автосохранение выполнено:', progress);
+  }
 
 // Загрузка прогресса из localStorage
 function loadProgress() {
-  const savedState = loadGameState();
-  
-  if (savedState) {
-    gameState.language = savedState.language || 'ru';
-    gameState.arc = savedState.arc || 1;
-    gameState.currentChapter = savedState.currentChapter || 'chapter1';
-    gameState.choices = savedState.choices || {};
+    const savedProgress = localStorage.getItem('gameProgress');
     
-    console.log('Прогресс загружен через ArcManager:', savedState);
-    
-    loadChapter(gameState.currentChapter);
-    
-    return true;
-  }
-  
-  const savedProgress = localStorage.getItem('gameProgress');
-  
-  if (savedProgress) {
-    try {
-      const progress = JSON.parse(savedProgress);
-      gameState.currentChapter = progress.chapter || 'chapter1';
-      gameState.arc = progress.arc || 1;
-      gameState.language = progress.language || 'ru';
-      gameState.choices = progress.choices || {};
-      
-      loadChapter(gameState.currentChapter);
-      
-      return true;
-    } catch (error) {
-      console.error('Ошибка при разборе сохраненного прогресса:', error);
-      return false;
+    if (savedProgress) {
+        try {
+            const progress = JSON.parse(savedProgress);
+            
+            // Восстанавливаем состояние
+            gameState.currentChapter = progress.chapter || 'chapter1';
+            gameState.arc = progress.arc || 1;
+            gameState.language = progress.language || 'ru';
+            gameState.choices = progress.choices || {};
+            
+            // Важно: правильно восстанавливаем контрольную точку
+            if (progress.lastCheckpoint) {
+                gameState.lastCheckpoint = {
+                    chapter: progress.lastCheckpoint.chapter,
+                    choices: progress.lastCheckpoint.choices || {},
+                    arc: progress.lastCheckpoint.arc || progress.arc || 1
+                };
+            } else {
+                gameState.lastCheckpoint = {
+                    chapter: progress.chapter || 'chapter1',
+                    choices: progress.choices || {},
+                    arc: progress.arc || 1
+                };
+            }
+            
+            console.log('Прогресс загружен:', progress);
+            console.log('Восстановлена контрольная точка:', gameState.lastCheckpoint);
+            
+            // Загружаем главу мгновенно (без анимации)
+            loadChapterInstant(gameState.currentChapter);
+            
+            return true;
+        } catch (error) {
+            console.error('Ошибка загрузки:', error);
+            return false;
+        }
     }
-  } else {
-    console.log('Сохраненный прогресс не найден');
     return false;
-  }
-}
-
-// Очистка прогресса
-function clearProgress() {
-  localStorage.removeItem('gameProgress');
-  console.log('Прогресс очищен');
-}
-
-// Функция загрузки предыдущей главы
-async function loadPreviousChapter() {
-    try {
-        if (!gameState.previousChapter) {
-            console.error('Предыдущая глава не найдена');
-            return false;
-        }
-
-        console.log(`Загрузка предыдущей главы: ${gameState.previousChapter}`);
-        
-        // Определяем путь к файлу главы в зависимости от арки
-        let chapterPath;
-        if (gameState.previousChapter.startsWith('arc2_')) {
-            chapterPath = `./chapters/arc2/${gameState.previousChapter}.js`;
-        } else {
-            chapterPath = `./chapters/arc1/${gameState.previousChapter}.js`;
-        }
-
-        const chapterModule = await import(chapterPath);
-        
-        if (!chapterModule?.default) {
-            console.error(`Ошибка: глава ${gameState.previousChapter} не найдена`);
-            return false;
-        }
-
-        gameState.currentChapter = gameState.previousChapter;
-        renderChapter(chapterModule.default, false);
-        
-        return true;
-    } catch (error) {
-        console.error('Ошибка загрузки предыдущей главы:', error);
-        return false;
-    }
 }
 
 // Функция перезапуска текущей главы
 function restartChapter() {
-    // Останавливаем все текущие процессы
-    gameState.isBusy = false;
-    gameState.dialogueEnded = false;
-    gameState.generateMessage = false;
+    console.log('Restarting chapter with lastCheckpoint:', gameState.lastCheckpoint);
+    if (gameState.isBusy) return;
     
-    if (gameState.lastCheckpoint.chapter) {
-        // Восстанавливаем состояние
+    // Используем последнюю контрольную точку, если она существует
+    if (gameState.lastCheckpoint && gameState.lastCheckpoint.chapter) {
+        // Восстанавливаем состояние из контрольной точки
         gameState.currentChapter = gameState.lastCheckpoint.chapter;
         gameState.choices = JSON.parse(JSON.stringify(gameState.lastCheckpoint.choices));
-        gameState.arc = gameState.lastCheckpoint.arc;
         
-        // Принудительно очищаем чат и карусель
-        clearChat();
-        clearImageCarousel();
-        
-        // Загружаем главу мгновенно
-        loadChapterInstant(gameState.lastCheckpoint.chapter);
+        // Если контрольная точка включает arc, восстанавливаем его
+        if (gameState.lastCheckpoint.arc) {
+            gameState.arc = gameState.lastCheckpoint.arc;
+        }
     } else {
-        console.log('Нет сохраненной точки возврата');
+        // Если нет контрольной точки, используем первую главу арки
+        const firstChapter = getFirstChapterOfCurrentArc();
+        gameState.currentChapter = firstChapter;
+        
+        // Сбрасываем только выборы текущей арки
+        const arcPrefix = gameState.arc === 1 ? '' : 'arc2_';
+        for (const key in gameState.choices) {
+            if (key.startsWith(arcPrefix)) {
+                delete gameState.choices[key];
+            }
+        }
     }
+    
+    // Очищаем чат
+    clearChat();
+    clearImageCarousel();
+    
+    // Загружаем главу из контрольной точки
+    console.log('Loading checkpoint chapter:', gameState.currentChapter);
+    loadChapterInstant(gameState.currentChapter);
+    
+    // Показываем экран чата
+    showScreen('chat');
+    showNavigation();
 }
 
 // Обновленная функция мгновенной загрузки главы
 async function loadChapterInstant(chapterId) {
+    if (!chapterId) {
+        console.error('loadChapterInstant: chapterId is undefined');
+        chapterId = getFirstChapterOfCurrentArc();
+    }
     try {
         // Останавливаем все текущие операции
         clearChat();
@@ -807,11 +901,23 @@ async function loadChapterInstant(chapterId) {
         gameState.generateMessage = false;
 
         let chapterPath;
-        if (chapterId.startsWith('arc2_')) {
+        if (chapterId.startsWith('arc2/')) {
+            chapterPath = `./chapters/${chapterId}.js`;
+            gameState.arc = 2;
+        } else if (chapterId.startsWith('arc2_after_date')) {
+            chapterPath = `./chapters/arc2/after_date/${chapterId}.js`;
+            gameState.arc = 2;
+        } else if (chapterId.startsWith('arc2_')) {
             chapterPath = `./chapters/arc2/${chapterId}.js`;
+            gameState.arc = 2;
+        } else if (chapterId.startsWith('special_')) {
+            // Для специальных глав
+            chapterPath = `./chapters/special/${chapterId}.js`;
         } else {
             chapterPath = `./chapters/arc1/${chapterId}.js`;
         }
+        
+        console.log('Loading chapter instant from path:', chapterPath);
 
         const chapterModule = await import(chapterPath);
         
@@ -864,6 +970,15 @@ function initGame() {
     updateClock();
     setInterval(updateClock, 60000);
 
+    // Пытаемся загрузить сохранённую игру ПЕРЕД началом новой
+    if (!loadProgress()) {
+        // Если сохранения нет, показываем стартовый экран
+        const startScreen = document.querySelector('.start-screen');
+        if (startScreen) {
+            startScreen.classList.add('active');
+        }
+    }
+
     const startButton = document.querySelector('.start-game-button');
     if (startButton) {
         startButton.addEventListener('click', function() {
@@ -873,7 +988,12 @@ function initGame() {
             if (startScreen) {
                 startScreen.classList.remove('active');
             }
-            
+
+             // Проверяем, есть ли сохранение
+             const hasProgress = loadProgress();
+        
+        if (!hasProgress) {
+            // Очищаем только при НАМЕРЕННОМ начале новой игры
             gameState.choices = {};
             gameState.arc = 1;
             gameState.isBusy = false;
@@ -882,6 +1002,9 @@ function initGame() {
             
             clearProgress();
             clearChat();
+
+            loadChapter('chapter1');
+        }
             
             const chatScreen = document.querySelector('[data-screen="chat"]');
             if (chatScreen) {
@@ -890,7 +1013,6 @@ function initGame() {
             
             showNavigation();
             
-            loadChapter('chapter1'); // Проверяем, что имя файла соответствует реальному файлу
         });
     }
     
@@ -918,12 +1040,12 @@ function initGame() {
     }
 
     const restartChapterBtn = document.querySelector('.start-chapter-over');
-    if (restartChapterBtn) {
-        restartChapterBtn.addEventListener('click', () => {
-            if (gameState.isBusy) return;
-            restartChapter();
-        });
-    }
+if (restartChapterBtn) {
+    restartChapterBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        restartChapter();
+    });
+}
 
     const restartArcBtn = document.querySelector('.nav-btn--endGame');
     if (restartArcBtn) {
@@ -983,6 +1105,7 @@ window.game = {
     determineSecondArcStart,
     saveGameState,
     loadGameState,
+    clearProgress, // Добавляем в экспорт, если нужно
     languageManager: null
 };
 
