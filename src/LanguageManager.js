@@ -11,6 +11,7 @@ export class LanguageManager {
         'to-be-continued': 'Продолжение следует...',
         'new-chapter': 'Начать новую главу',
         'new-game': 'Начать новую игру',
+        'continue-game': 'Продолжить игру',
         'restart-chapter': 'Начать главу заново',
         'change-lang': 'Поменять язык',
         'online': 'онлайн',
@@ -24,6 +25,7 @@ export class LanguageManager {
         'to-be-continued': 'To be continued...',
         'new-chapter': 'Start New Chapter',
         'new-game': 'Start New Game',
+        'continue-game': 'Continue Game',
         'restart-chapter': 'Restart Chapter',
         'change-lang': 'Change Language',
         'online': 'online',
@@ -32,7 +34,8 @@ export class LanguageManager {
         'boostyAdditionalText': 'Start new game'
       }
     };
-    this.updateLanguageButton(); // Инициализируем кнопку при создании
+        this.updateLanguageButton(); // Инициализируем кнопку при создании
+        this.updateTexts(); // Инициализируем переводы при создании
   }
 
   toggleLanguage() {
@@ -64,6 +67,8 @@ export class LanguageManager {
 
   updateTexts() {
     const elements = [
+      { selector: '.continue-game-button', key: 'continue-game', property: 'textContent' },
+      { selector: '.start-game-button', key: 'new-game', property: 'textContent' },
       { selector: '.endgame-content h2', key: 'end-chapter' },
       { selector: '.endgame-content p:nth-child(2)', key: 'thanks' },
       { selector: '.endgame-content p:nth-child(3)', key: 'to-be-continued' },
@@ -78,11 +83,12 @@ export class LanguageManager {
     ];
 
     elements.forEach(({ selector, key, property = 'textContent' }) => {
-      const element = document.querySelector(selector);
+      // Обрабатываем все элементы, если их несколько
+      const element = document.querySelectorAll(selector);
       if (element) {
         element[property] = this.translations[this.currentLang][key];
       } else {
-        console.warn(`Элемент ${selector} не найден в DOM`);
+        console.debug(`Элемент ${selector} не найден в DOM`);
       }
     });
 
@@ -94,7 +100,7 @@ export class LanguageManager {
         const chatItem = chatList.querySelector(`.chat-item[data-chat-id="${id}"]`);
         if (chatItem) {
           const nameElement = chatItem.querySelector('.chat-info h2');
-          const onlineElement = chatItem.querySelector('.online-status');
+          const onlineElement = chatItem.querySelectorAll('.online-status');
           if (nameElement) {
             nameElement.textContent = chat.name[this.currentLang] || chat.name.ru;
           }
@@ -103,6 +109,11 @@ export class LanguageManager {
           }
         }
       });
+    }
+    // Обновляем статус онлайн в текущем чате
+    const chatHeaderStatus = document.querySelector('.chat-header .online-status');
+    if (chatHeaderStatus) {
+      chatHeaderStatus.textContent = this.translations[this.currentLang]['online'];
     }
   }
 }

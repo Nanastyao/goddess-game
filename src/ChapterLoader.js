@@ -1,9 +1,20 @@
+// ChapterLoader.js
 export class ChapterLoader {
   constructor(messageRenderer, gameStateManager) {
     this.messageRenderer = messageRenderer;
     this.gameStateManager = gameStateManager;
     this.currentMessages = [];
     this.currentChoices = [];
+    this.renderTimeouts = []; // Для хранения setTimeout
+    this.isRendering = false; // Флаг рендера
+  }
+
+  // Очистка всех таймеров
+  clearRenderTimeouts() {
+    this.renderTimeouts.forEach(clearTimeout);
+    this.renderTimeouts = [];
+    this.isRendering = false;
+    console.log('Все таймеры рендера очищены, блядина');
   }
 
   async loadChapter(chapterId, isRestart = false) {
@@ -25,6 +36,7 @@ export class ChapterLoader {
 
       if (isRestart) {
         this.messageRenderer.clearChat();
+        this.clearRenderTimeouts(); // Очищаем предыдущие таймеры
       }
 
       this.gameStateManager.gameState.currentChapter = chapterId;
@@ -39,13 +51,17 @@ export class ChapterLoader {
   }
 
   async renderChapter(messages, choices) {
+    if (this.isRendering) {
+      this.clearRenderTimeouts(); // Останавливаем текущий рендер
+    }
+    this.isRendering = true;
     const currentLang = this.gameStateManager.gameState.language || 'ru';
     console.log(`Рендеринг главы, сообщений=${messages.length}`);
 
     for (let i = 0; i < messages.length; i++) {
       const message = messages[i];
       const text = typeof message.text === 'object' ? message.text[currentLang] || message.text.ru || '' : message.text || '';
-      const description = typeof message.description === 'object' ? description[currentLang] || message.description.ru || '' : message.description || '';
+      const description = typeof message.description === 'object' ? message.description[currentLang] || message.description.ru || '' : message.description || '';
 
       console.log(`Рендеринг сообщения ${i + 1}/${messages.length}: ${text}, задержка: ${message.delay || 1500}ms`);
       this.messageRenderer.addMessage(message.type, text, message.src, description);
@@ -54,8 +70,18 @@ export class ChapterLoader {
         message.onAfter();
       }
 
-      await new Promise(resolve => setTimeout(resolve, message.delay || 1500));
-      console.log(`Задержка ${message.delay || 1500}ms завершена для сообщения ${i + 1}`);
+      await new Promise(resolve => {
+        const timeoutId = setTimeout(() => {
+          resolve();
+          this.renderTimeouts = this.renderTimeouts.filter(id => id !== timeoutId);
+        }, message.delay || 1500);
+        this.renderTimeouts.push(timeoutId);
+      });
+
+      if (!this.isRendering) {
+        console.log('Рендер прерван');
+        return;
+      }
 
       if (message.showChoices || (choices.length > 0 && i === messages.length - 1)) {
         console.log('Прерываем цикл для показа выборов');
@@ -72,21 +98,23 @@ export class ChapterLoader {
       this.messageRenderer.chatContainer.scrollTop = this.messageRenderer.chatContainer.scrollHeight;
       console.log('Прокрутка выполнена');
     });
+    this.isRendering = false;
+  }
+
+  updateLanguage() {
+    this.messageRenderer.clearChat();
+    this.clearRenderTimeouts(); // Очищаем текущий рендер
+    console.log('Чат очищен для смены языка');
+    const chapterId = this.gameStateManager.gameState.currentChapter || 'chapter1';
+    console.log(`Смена языка: перезагружаем главу ${chapterId} с начала`);
+    this.gameStateManager.saveProgress();
+    this.loadChapter(chapterId, true);
   }
 
   restartChapter(gameState) {
     const chapterId = gameState.currentChapter || 'chapter1';
     console.log(`Перезапуск главы: ${chapterId}`);
-    this.loadChapter(chapterId, true);
-  }
-
-  updateLanguage() {
-    this.messageRenderer.clearChat();
-    console.log('Чат очищен для смены языка');
-
-    const chapterId = this.gameStateManager.gameState.currentChapter || 'chapter1';
-    console.log(`Смена языка: перезагружаем главу ${chapterId} с начала`);
-
+    this.clearRenderTimeouts(); // Очищаем рендер при перезапуске
     this.loadChapter(chapterId, true);
   }
 }

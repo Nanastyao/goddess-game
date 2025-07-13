@@ -100,11 +100,14 @@ export class MessageRenderer {
   }
 
   clearChat() {
-    if (this.chatContainer && this.choicesContainer) {
-      this.chatContainer.innerHTML = '';
-      this.choicesContainer.innerHTML = '';
-      this.choicesContainer.classList.remove('visible');
-      this.chatContainer.classList.remove('has-choices');
+  if (this.chatContainer && this.choicesContainer) {
+    this.chatContainer.innerHTML = '';
+    this.choicesContainer.innerHTML = '';
+    this.choicesContainer.classList.remove('visible');
+    this.chatContainer.classList.remove('has-choices');
+    console.log('Чат полностью очищен');
+  } else {
+    console.error('chatContainer или choicesContainer не найдены');
     }
   }
 }

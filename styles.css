@@ -144,7 +144,8 @@ body {
     display: flex;
 }
 
-.start-game-button {
+.start-game-button,
+.continue-game-button {
     padding: 15px 30px;
     font-size: 1.2rem;
     background-color: var(--primary-color);
@@ -155,7 +156,8 @@ body {
     transition: background-color 0.3s;
 }
 
-.start-game-button:hover {
+.start-game-button:hover,
+.continue-game-button:hover {
     background-color: var(--primary-color-hover);
 }
 

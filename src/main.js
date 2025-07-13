@@ -1,4 +1,3 @@
-import { initImageCarousel, clearImageCarousel } from './js/imageCarousel.js';
 import { GameStateManager } from './GameStateManager.js';
 import { LanguageManager } from './LanguageManager.js';
 import { MessageRenderer } from './MessageRenderer.js';
@@ -65,32 +64,64 @@ function initGame() {
   updateClock();
   setInterval(updateClock, 60000);
 
-  // Инициализация аудио после первого взаимодействия
+  // Инициализация аудио
+  let audioInitialized = false;
   const initAudio = () => {
-    const audio = new Audio('sounds/msg.mp3');
-    audio.play().then(() => audio.pause()).catch(error => console.error('Ошибка инициализации аудио:', error));
+    if (!audioInitialized) {
+      const audio = new Audio('sounds/msg.mp3');
+      audio.play().then(() => {
+        audio.pause();
+        audioInitialized = true;
+        console.log('Аудиоинициализация успешна');
+      }).catch(error => console.error('Ошибка инициализации аудио:', error));
+    }
     document.removeEventListener('click', initAudio);
   };
-  document.addEventListener('click', initAudio);
+  document.addEventListener('click', initAudio, { once: true });
 
-  if (!gameStateManager.loadProgress()) {
-    const startScreen = document.querySelector('.start-screen');
-    if (startScreen) startScreen.classList.add('active');
-  }
-  if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js')
-    .then(() => console.log('Сервис-воркер зарегистрирован'))
-    .catch((err) => console.error('Ошибка регистрации сервис-воркера:', err));
-}
-
+  // Проверяем прогресс и управляем отображением кнопок
+  const startScreen = document.querySelector('.start-screen');
   const startButton = document.querySelector('.start-game-button');
+  const continueButton = document.querySelector('.continue-game-button');
+
+  if (startScreen && startButton && continueButton) {
+    if (gameStateManager.loadProgress()) {
+      continueButton.style.display = 'block';
+      startButton.style.display = 'none';
+    } else {
+      startScreen.classList.add('active');
+      continueButton.style.display = 'none';
+      startButton.style.display = 'block';
+    }
+  }
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js')
+      .then(() => console.log('Сервис-воркер зарегистрирован'))
+      .catch((err) => console.error('Ошибка регистрации сервис-воркера:', err));
+  }
+
+  // Обработчики кнопок
   if (startButton) {
     startButton.addEventListener('click', () => {
       startNewGame();
-      const startScreen = document.querySelector('.start-screen');
-      if (startScreen) startScreen.classList.remove('active');
+      startScreen.classList.remove('active');
       screenManager.showScreen('chat');
       screenManager.showNavigation();
+    });
+  }
+
+  if (continueButton) {
+    continueButton.addEventListener('click', () => {
+      if (gameStateManager.loadProgress()) {
+        chapterLoader.loadChapter(gameStateManager.gameState.currentChapter);
+        startScreen.classList.remove('active');
+        screenManager.showScreen('chat');
+        screenManager.showNavigation();
+        console.log('Прогресс загружен, продолжаем с главы:', gameStateManager.gameState.currentChapter);
+      } else {
+        console.warn('Нет сохранённого прогресса для продолжения');
+      }
     });
   }
 
@@ -126,10 +157,10 @@ function initGame() {
   const bindLanguageButton = () => {
     const langButton = document.querySelector('.lang-btn');
     if (langButton) {
-      langButton.removeEventListener('click', handleLangButtonClick); // Удаляем старый обработчик
+      langButton.removeEventListener('click', handleLangButtonClick);
       langButton.addEventListener('click', handleLangButtonClick);
       console.log('Обработчик кнопки языка привязан');
-      languageManager.updateLanguageButton(); // Обновляем кнопку при привязке
+      languageManager.updateLanguageButton();
     } else {
       console.warn('Кнопка языка (.lang-btn) не найдена, повторная попытка через 500мс');
       setTimeout(bindLanguageButton, 500);
@@ -142,7 +173,7 @@ function initGame() {
     languageManager.toggleLanguage();
   }
 
-  bindLanguageButton(); // Вызываем при инициализации
+  bindLanguageButton();
 }
 
 // Обновление часов
@@ -269,4 +300,5 @@ function initChats() {
 window.addEventListener('DOMContentLoaded', () => {
   initGame();
   initChats();
+  languageManager.updateTexts();
 });

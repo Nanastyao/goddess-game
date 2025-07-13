@@ -72,6 +72,7 @@ export class GameStateManager {
         return false;
       }
     }
+    console.log('Нет сохранённого прогресса');
     return false;
   }
 
